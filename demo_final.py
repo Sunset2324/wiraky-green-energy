@@ -1,5 +1,6 @@
 import os
 import json
+import hmac
 from flask import Flask, request, jsonify, render_template_string
 from dotenv import load_dotenv
 
@@ -11,6 +12,10 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 # --- KONFIGURASI GATEWAY ---
 # Nama variabel di .env adalah XENDIT_SECRET_KEY (XENDIT_API_KEY tetap didukung sebagai fallback)
 XENDIT_API_KEY = os.getenv('XENDIT_SECRET_KEY') or os.getenv('XENDIT_API_KEY', '')
+
+# Verification token dari Xendit Dashboard (Settings > Webhooks), dikirim Xendit
+# di header "x-callback-token". Tanpa ini, webhook akan menolak semua request.
+XENDIT_CALLBACK_TOKEN = os.getenv('XENDIT_CALLBACK_TOKEN', '')
 
 # Inisialisasi Xendit SDK v5 (xendit-python==5.0.0):
 # tidak ada xendit.Client / xendit.Invoice lagi, pakai InvoiceApi + CreateInvoiceRequest
@@ -132,9 +137,23 @@ def create_invoice():
 @app.route('/webhook/xendit', methods=['POST'])
 def webhook_handler():
     """Halaman 4 & 7: Verifikasi Webhook Otomatis"""
-    payload = request.form if request.form else request.get_json()
+    # 1. Verifikasi asal request (fail-closed: token belum diset = semua ditolak)
+    if not XENDIT_CALLBACK_TOKEN:
+        print("⚠️ Webhook ditolak: XENDIT_CALLBACK_TOKEN belum diisi di .env")
+        return jsonify({"error": "webhook not configured"}), 503
+
+    received_token = request.headers.get('x-callback-token', '')
+    # Bandingkan sebagai bytes: compare_digest melempar TypeError untuk str non-ASCII
+    if not hmac.compare_digest(received_token.encode('utf-8'), XENDIT_CALLBACK_TOKEN.encode('utf-8')):
+        print("⛔ Webhook ditolak: x-callback-token tidak valid")
+        return jsonify({"error": "invalid callback token"}), 403
+
+    # 2. Baca payload (JSON dari Xendit; form tetap didukung untuk tes manual)
+    payload = request.form if request.form else request.get_json(silent=True)
+    if not payload:
+        return jsonify({"error": "invalid payload"}), 400
     status = payload.get('status')
-    
+
     print(f"🔔 Webhook Masuk: Status {status}")
 
     if status == 'PAID':
@@ -146,4 +165,7 @@ def webhook_handler():
     return jsonify({"status": "ignored"}), 200
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Debug MATI secara default (aman jika diakses lewat tunnel/ngrok).
+    # Untuk development lokal saja: set FLASK_DEBUG=1 di .env
+    debug_mode = os.getenv('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes')
+    app.run(debug=debug_mode, host='127.0.0.1', port=int(os.getenv('PORT', '5000')))
