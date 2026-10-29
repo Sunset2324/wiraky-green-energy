@@ -2,6 +2,28 @@ import os
 import sys
 from flask import Flask
 from dotenv import load_dotenv
+from flask import render_template
+
+# Data Dummy Master Price (Nanti ambil dari Database)
+MASTER_PRICE = {
+    "PLTS_01": {"name": "Panel Surya Extra", "price": 5000000},
+    "INV_01": {"name": "Inverter Upgrade", "price": 3000000}
+}
+
+@app.route('/')
+def surveyor_page():
+    return render_template('surveyor_input.html', 
+                           customer_name="Budi Santoso", 
+                           master_price=MASTER_PRICE)
+
+@app.route('/dashboard')
+def internal_dashboard():
+    # Nanti data ini diambil dari Database
+    dummy_orders = [
+        {"order_id": "WRK-001", "customer_name": "Budi S.", "amount": 5000000, "status": "LUNAS"},
+        {"order_id": "WRK-002", "customer_name": "Siti A.", "amount": 3000000, "status": "MENUNGGU PEMBAYARAN"}
+    ]
+    return render_template('internal_dashboard.html', orders=dummy_orders)
 
 # 1. Load Environment Variables dari file .env
 load_dotenv()

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Input Survei - Wiraky{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>🛠️ Input Kebutuhan Tambahan</h2>
+    <p>Silakan isi rincian material/jasa di luar paket standar IndiHome Aura.</p>
+    
+    <form action="/process_order" method="POST">
+        <label>Nama Pelanggan</label>
+        <input type="text" name="customer_name" value="{{ customer_name }}" readonly>
+        
+        <label>Nomor Order Telkomsel</label>
+        <input type="text" name="order_id" placeholder="Contoh: ORD-12345" required>
+
+        <label>Pilih Material/Jasa (Master Price List)</label>
+        <select name="item_code" required>
+            {% for code, info in master_price.items() %}
+            <option value="{{ code }}">{{ info.name }} - Rp {{ "{:,}".format(info.price) }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Alasan Teknis & Foto Pendukung</label>
+        <textarea name="reason" rows="3" placeholder="Jelaskan mengapa material ini diperlukan..."></textarea>
+
+        <button type="submit" class="btn">✅ Hitung & Ajukan Persetujuan</button>
+    </form>
+</div>
+{% endblock %}

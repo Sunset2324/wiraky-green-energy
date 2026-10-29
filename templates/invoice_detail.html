@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Pembayaran Invoice {{ invoice_id }}{% endblock %}
+
+{% block content %}
+<div class="card" style="text-align: center;">
+    <img src="{{ url_for('static', filename='images/logo_wiraky.png') }}" alt="Logo Wiraky" width="120" onerror="this.style.display='none'">
+    <h2>Invoice #{{ invoice_id }}</h2>
+    <p>PT Wiraky Nusa Telekomunikasi</p>
+    
+    <h1 style="color: var(--primary);">Rp {{ "{:,}".format(amount) }}</h1>
+    
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: left;">
+        <p><strong>Pelanggan:</strong> {{ customer_name }}</p>
+        <p><strong>Order ID:</strong> {{ order_id }}</p>
+        <p><strong>Status:</strong> <span class="badge b-pending">MENUNGGU PEMBAYARAN</span></p>
+        <p><strong>Batas Waktu:</strong> {{ expired_at }}</p>
+    </div>
+
+    <!-- Simulasi Tombol Metode Pembayaran -->
+    <a href="{{ payment_link }}" target="_blank" class="btn" style="display: block; text-decoration: none; margin-bottom: 10px;">
+        💳 Bayar via Virtual Account / QRIS
+    </a>
+    <small>Pembayaran hanya melalui kanal resmi PT Wiraky.</small>
+</div>
+{% endblock %}

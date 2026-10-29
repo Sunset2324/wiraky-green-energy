@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Dashboard Internal - Wiraky{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📊 Monitoring Additional Cost</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Order ID</th>
+                <th>Pelanggan</th>
+                <th>Nominal</th>
+                <th>Status</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in orders %}
+            <tr>
+                <td>{{ order.order_id }}</td>
+                <td>{{ order.customer_name }}</td>
+                <td>Rp {{ "{:,}".format(order.amount) }}</td>
+                <td>
+                    {% if order.status == 'LUNAS' %}
+                        <span class="badge b-lunas">LUNAS ✅</span>
+                    {% else %}
+                        <span class="badge b-pending">{{ order.status }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if order.status == 'LUNAS' %}
+                        <button style="padding: 5px 10px; cursor: pointer;">Jadwalkan Pasang</button>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
