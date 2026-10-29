@@ -1,69 +1,166 @@
+"""Green Energy - IndiHome Aura: integrasi Additional Cost dengan Sistem Keuangan Wiraky.
+
+Mengikuti "Standar API Integrated" v1.0:
+  Green Energy --POST additional-costs (HMAC)--> Finance API  (202 RECEIVED)
+  Finance API  --POST payment-events  (HMAC)--> Green Energy  (status PAID dst.)
+  Green Energy --GET status--> Finance API  (rekonsiliasi bila callback hilang)
+
+Menjalankan:   python app.py          (PORT dan FLASK_DEBUG dibaca dari .env / environment)
+Demo lokal:    tanpa WIRAKY_FINANCE_API_URL -> Finance disimulasikan di /finance-sim
+"""
+import logging
 import os
-import sys
-from flask import Flask
+import secrets
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional
+
 from dotenv import load_dotenv
-from flask import render_template
+from flask import Flask, jsonify, redirect, url_for
 
-# Data Dummy Master Price (Nanti ambil dari Database)
-MASTER_PRICE = {
-    "PLTS_01": {"name": "Panel Surya Extra", "price": 5000000},
-    "INV_01": {"name": "Inverter Upgrade", "price": 3000000}
-}
+from config.settings import ConfigError, IntegrationSettings, load_integration_settings
+from core.repository import InMemoryRepository
+from core.security import RateLimiter
+from services.finance_client import FinanceClient
+from services.finance_simulator import FinanceSimulator
+from services.outbox import BackgroundWorker, OutboxProcessor
+from services.reconciliation import Reconciler
 
-@app.route('/')
-def surveyor_page():
-    return render_template('surveyor_input.html', 
-                           customer_name="Budi Santoso", 
-                           master_price=MASTER_PRICE)
+WIB = timezone(timedelta(hours=7))
 
-@app.route('/dashboard')
-def internal_dashboard():
-    # Nanti data ini diambil dari Database
-    dummy_orders = [
-        {"order_id": "WRK-001", "customer_name": "Budi S.", "amount": 5000000, "status": "LUNAS"},
-        {"order_id": "WRK-002", "customer_name": "Siti A.", "amount": 3000000, "status": "MENUNGGU PEMBAYARAN"}
-    ]
-    return render_template('internal_dashboard.html', orders=dummy_orders)
 
-# 1. Load Environment Variables dari file .env
-load_dotenv()
+@dataclass
+class Services:
+    settings: IntegrationSettings
+    repo: InMemoryRepository
+    client: FinanceClient
+    outbox: OutboxProcessor
+    reconciler: Reconciler
+    limiter: RateLimiter
+    now: Callable[[], datetime]
+    simulator: Optional[FinanceSimulator] = None
+    worker: Optional[BackgroundWorker] = None
 
-# 2. Inisialisasi Aplikasi Flask
-app = Flask(__name__)
+    def start_background(self):
+        """Jalankan worker outbox + rekonsiliasi (dipanggil dari main, bukan dari create_app)."""
+        if self.worker is None:
+            self.worker = BackgroundWorker(
+                [self.outbox.process_due, self.reconciler.reconcile_pending], self.settings.worker_interval)
+        self.worker.start()
 
-# Konfigurasi Dasar
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'default-secret-key-change-me')
-app.config['JSON_AS_ASCII'] = False # Agar karakter Indonesia (UTF-8) aman di JSON
 
-# 3. Import Routes (Blueprints)
-# Kita import di sini agar struktur folder tetap rapi
-from routes.webhook_routes import webhook_bp
-from routes.api_routes import api_bp
-from routes.dashboard_routes import dashboard_bp
+def _rupiah(value) -> str:
+    try:
+        return "Rp " + f"{int(value):,}".replace(",", ".")
+    except (TypeError, ValueError):
+        return "-"
 
-# 4. Registrasi Blueprint ke Aplikasi Utama
-app.register_blueprint(webhook_bp, url_prefix='/webhook')
-app.register_blueprint(api_bp, url_prefix='/api')
-app.register_blueprint(dashboard_bp, url_prefix='/dashboard')
 
-# 5. Route Default (Health Check)
-@app.route('/')
-def home():
+def _wib(value) -> str:
+    if not isinstance(value, datetime):
+        return "-"
+    return value.astimezone(WIB).strftime("%d %b %H:%M:%S")
+
+
+def _badge(status) -> str:
     return {
-        "status": "online", 
-        "service": "Wiraky Green Energy Payment System",
-        "message": "Sistem pembayaran Additional Cost siap digunakan."
-    }
+        "PAID": "b-lunas", "REFUNDED": "b-danger", "FAILED": "b-danger", "EXPIRED": "b-danger",
+        "REVIEW": "b-danger", "NOT_REQUIRED": "b-muted", "CANCELLED": "b-muted", "PENDING": "b-pending",
+    }.get(status, "b-pending")
 
-# 6. Error Handling Global
-@app.errorhandler(404)
-def not_found(error):
-    return {"error": "Endpoint tidak ditemukan"}, 404
 
-@app.errorhandler(500)
-def internal_error(error):
-    return {"error": "Terjadi kesalahan pada server"}, 500
+def create_app(env=None, *, finance_transport=None, callback_transport=None, now=None) -> Flask:
+    """Application factory. Parameter transport/now hanya untuk pengujian (injeksi)."""
+    env = os.environ if env is None else env
+    settings = load_integration_settings(env)
+    clock = now or (lambda: datetime.now(timezone.utc))
 
-# 7. Entry Point untuk Development Lokal
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app = Flask(__name__, template_folder="templates", static_folder="static")
+    app.config["SECRET_KEY"] = env.get("SECRET_KEY") or secrets.token_hex(32)
+    app.config["JSON_AS_ASCII"] = False            # karakter Indonesia aman di JSON
+    app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024  # body > 1 MB ditolak (413)
+
+    repo = InMemoryRepository()
+    client = FinanceClient(settings, transport=finance_transport, now=clock)
+    svc = Services(
+        settings=settings, repo=repo, client=client,
+        outbox=OutboxProcessor(repo, client, settings, clock),
+        reconciler=Reconciler(repo, client, settings, clock),
+        limiter=RateLimiter(settings.webhook_rate_limit_per_minute),
+        now=clock,
+    )
+    if settings.simulator_enabled:
+        svc.simulator = FinanceSimulator(settings, now=clock, callback_transport=callback_transport)
+    app.extensions["wiraky"] = svc
+
+    app.jinja_env.filters.update(rupiah=_rupiah, wib=_wib, badge=_badge)
+    app.context_processor(lambda: {"has_simulator": svc.simulator is not None})
+
+    from routes.api_routes import api_bp
+    from routes.dashboard_routes import ui_bp
+    from routes.webhook_routes import webhook_bp
+    app.register_blueprint(webhook_bp)
+    app.register_blueprint(api_bp)
+    app.register_blueprint(ui_bp)
+    if svc.simulator is not None:
+        from routes.simulator_routes import sim_bp
+        app.register_blueprint(sim_bp)
+
+    @app.get("/")
+    def home():
+        return redirect(url_for("ui.surveyor_form"))
+
+    @app.get("/health")
+    def health():
+        return {"status": "online", "service": "Wiraky Green Energy - Additional Cost Integration",
+                "mode": settings.mode}
+
+    @app.errorhandler(404)
+    def not_found(error):
+        return {"error": "Endpoint tidak ditemukan"}, 404
+
+    @app.errorhandler(413)
+    def too_large(error):
+        return {"error": "PAYLOAD_TOO_LARGE"}, 413
+
+    @app.errorhandler(500)
+    def internal_error(error):
+        return {"error": "Terjadi kesalahan pada server"}, 500
+
+    return app
+
+
+def _banner(app, settings, port, debug):
+    print("\n=== Green Energy - Integrasi Additional Cost (Standar API v1.0) ===")
+    print(f"Mode        : {settings.mode}" + ("  (Finance DISIMULASIKAN, bukan sistem asli)" if settings.simulator_enabled else ""))
+    print(f"Debug       : {'ON' if debug else 'OFF'}   Port: {port}")
+    print(f"Webhook     : POST /api/v1/finance/payment-events")
+    print(f"Finance API : {settings.finance_api_url}")
+    if settings.ephemeral_secrets:
+        print("Secret      : acak per proses (mode simulator, tidak disimpan). Penyimpanan: IN-MEMORY, hilang saat restart.")
+    else:
+        print("Penyimpanan : IN-MEMORY, hilang saat restart (belum untuk produksi).")
+    print(f"Halaman     : /surveyor  /dashboard" + ("  /finance-sim" if settings.simulator_enabled else "") + "\n")
+
+
+def main():
+    load_dotenv()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    try:
+        app = create_app()
+    except ConfigError as exc:
+        raise SystemExit(f"[!] Konfigurasi tidak valid: {exc}")
+
+    debug = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true", "yes")
+    port = int(os.getenv("PORT", "5000"))
+    svc = app.extensions["wiraky"]
+    # Dengan reloader (debug), hanya proses anak yang boleh menjalankan worker
+    if not debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        svc.start_background()
+    if not debug or os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        _banner(app, svc.settings, port, debug)
+    app.run(debug=debug, host="127.0.0.1", port=port)
+
+
+if __name__ == "__main__":
+    main()

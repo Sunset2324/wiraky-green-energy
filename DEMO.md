@@ -63,3 +63,13 @@ Link berubah jika tunnel dibuat ulang, jadi perbarui URL ini setiap kali. Setela
 ## Keamanan repo
 
 `.env` sebelumnya sudah ter-commit. Keluarkan dari git (file lokal tetap aman): `git rm --cached .env` lalu commit. Key yang pernah ter-commit sebaiknya di-revoke dan diganti di Dashboard.
+
+
+## Mode Standar API Integrated (app.py)
+
+Menjalankan alur Approved → RECEIVED → PAID dengan Finance disimulasikan:
+
+    APP_ENTRY=app.py ./start_demo.sh            # Windows PowerShell: $env:APP_ENTRY="app.py"; .\start_demo.bat
+
+Buka `<link>/surveyor` (buat pengajuan), `<link>/dashboard?auto=1` (pantau), `<link>/finance-sim/` (tombol bayar, nominal salah, duplikat, signature palsu, dll.).
+Penyimpanan in-memory: data hilang saat restart. Detail: `docs/STANDAR_API_IMPLEMENTASI.md`.

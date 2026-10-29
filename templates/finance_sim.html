@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Simulator Finance Wiraky{% endblock %}
+
+{% block content %}
+<div class="alert alert-warn">
+    <b>SIMULATOR Finance Wiraky</b>: bukan sistem Finance asli. Dipakai untuk demo dan UAT alur
+    Approved → RECEIVED → PAID, termasuk skenario negatif. Callback dikirim bertanda tangan HMAC ke Green Energy.
+</div>
+{% if msg %}<div class="alert alert-info">{{ msg }}</div>{% endif %}
+
+<div class="card">
+    <h2>🏦 Invoice di sisi Finance</h2>
+    <p class="muted"><a href="/dashboard?auto=1">Lihat dashboard Green Energy (auto-refresh)</a></p>
+    <div class="scroll">
+    <table>
+        <thead><tr><th>Invoice</th><th>Order</th><th>Nominal</th><th>Status Finance</th><th>Callback terakhir</th><th>Aksi simulasi</th></tr></thead>
+        <tbody>
+        {% for inv in invoices %}
+        {% set open = inv.status != 'CANCELLED' %}
+        <tr class="{% if not open %}row-muted{% endif %}">
+            <td class="mono">{{ inv.invoice_id }}<br><span class="muted">{{ inv.finance_reference }} · R{{ inv.revision }}</span></td>
+            <td>{{ inv.order_id }}</td>
+            <td>{{ inv.total_amount | rupiah }}</td>
+            <td><span class="badge {{ inv.status | badge }}">{{ inv.status }}</span></td>
+            <td class="mono">
+                {% if inv.deliveries %}{% set d = inv.deliveries[-1] %}{{ d.payment_status }} → HTTP {{ d.http_status or '-' }}<br>{{ d.response }}{% else %}-{% endif %}
+            </td>
+            <td>
+                {% if open %}
+                {% for act, label, cls in [
+                    ('pay', 'Bayar (valid)', ''),
+                    ('pay_wrong', 'Bayar nominal salah', 'btn-red'),
+                    ('pay_silent', 'Bayar tanpa callback', 'btn-blue'),
+                    ('expire', 'Kedaluwarsa', 'btn-gray'),
+                    ('fail', 'Gagal', 'btn-gray'),
+                    ('refund', 'Refund', 'btn-gray'),
+                    ('resend', 'Kirim ulang (duplikat)', 'btn-gray'),
+                    ('bad_signature', 'Signature palsu', 'btn-red'),
+                    ('replay_old', 'Replay timestamp lama', 'btn-red')] %}
+                <form method="post" action="/finance-sim/actions/{{ act }}/{{ inv.additional_cost_id }}">
+                    <button class="btn btn-sm {{ cls }}" type="submit">{{ label }}</button>
+                </form>
+                {% endfor %}
+                {% else %}<span class="muted">dibatalkan oleh revisi baru</span>{% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="muted">Belum ada pengajuan dari Green Energy. Buat dari halaman Surveyor.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Panduan skenario UAT</h2>
+    <table>
+        <tr><th>Tombol</th><th>Yang seharusnya terjadi di Green Energy</th></tr>
+        <tr><td>Bayar (valid)</td><td>HTTP 200 RECORDED → status <b>PAID</b></td></tr>
+        <tr><td>Bayar nominal salah</td><td>HTTP 409 AMOUNT_MISMATCH → status tidak berubah, muncul notifikasi admin</td></tr>
+        <tr><td>Bayar tanpa callback</td><td>Tidak ada callback. Klik "Cek status ke Finance" di dashboard → rekonsiliasi GET → PAID</td></tr>
+        <tr><td>Kirim ulang (duplikat)</td><td>HTTP 200 DUPLICATE, tidak ada perubahan</td></tr>
+        <tr><td>Signature palsu</td><td>HTTP 401 INVALID_SIGNATURE</td></tr>
+        <tr><td>Replay timestamp lama</td><td>HTTP 401 INVALID_TIMESTAMP</td></tr>
+        <tr><td>Kedaluwarsa / Gagal / Refund</td><td>Dicatat sebagai status informatif; PAID tidak pernah diturunkan sembarangan</td></tr>
+    </table>
+</div>
+{% endblock %}
