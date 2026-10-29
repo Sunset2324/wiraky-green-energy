@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Review Order - Wiraky{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📋 Review Rincian Additional Cost</h2>
+    <p style="color: #666;">Mohon periksa kembali rincian berikut sebelum disetujui.</p>
+    
+    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #003d79;">
+        <h3 style="margin-top: 0; color: #003d79;">📌 Informasi Pelanggan</h3>
+        <table>
+            <tr><td style="width: 200px;"><b>Nama Pelanggan</b></td><td>{{ order.customer_name }}</td></tr>
+            <tr><td><b>Nomor WhatsApp</b></td><td>{{ order.customer_phone }}</td></tr>
+            <tr><td><b>Nomor Order</b></td><td>{{ order.order_id }}</td></tr>
+            <tr><td><b>Paket</b></td><td>{{ order.package }}</td></tr>
+        </table>
+    </div>
+    
+    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2ecc71;">
+        <h3 style="margin-top: 0; color: #003d79;">🛠️ Rincian Material/Jasa</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Kode</th>
+                    <th>Deskripsi</th>
+                    <th style="text-align: center;">Qty</th>
+                    <th style="text-align: right;">Harga Satuan</th>
+                    <th style="text-align: right;">Subtotal</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in order['items'] %}
+                <tr>
+                    <td>{{ item.part_code }}</td>
+                    <td>{{ item.description }}</td>
+                    <td style="text-align: center;">{{ item.qty }} {{ item.unit }}</td>
+                    <td style="text-align: right;">Rp {{ "{:,}".format(item.unit_price) }}</td>
+                    <td style="text-align: right;">Rp {{ "{:,}".format(item.subtotal) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr style="background: #d4edda; font-weight: bold;">
+                    <td colspan="4" style="text-align: right;">TOTAL:</td>
+                    <td style="text-align: right; color: #28a745; font-size: 1.1em;">Rp {{ "{:,}".format(order.total_amount) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    
+    {% if order.reason %}
+    <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; border-radius: 6px; margin: 20px 0;">
+        <b>📝 Alasan Teknis:</b><br>
+        {{ order.reason }}
+    </div>
+    {% endif %}
+    
+    <div style="background: #d1ecf1; padding: 15px; border-left: 4px solid #17a2b8; border-radius: 6px; margin: 20px 0;">
+        <b>ℹ️ Informasi Penting:</b>
+        <ul style="margin: 10px 0 0 20px;">
+            <li>Dengan menyetujui, data akan dikirim ke <b>Sistem Keuangan Wiraky</b>.</li>
+            <li>Invoice dan WhatsApp penagihan akan dikirim otomatis oleh sistem Finance.</li>
+            <li>Pembayaran hanya melalui kanal resmi PT Wiraky Nusa Telekomunikasi.</li>
+            <li>Petugas lapangan <b>dilarang</b> meminta uang tunai atau tips.</li>
+        </ul>
+    </div>
+    
+    <form action="{{ url_for('confirm_order') }}" method="POST" style="margin-top: 20px;">
+        <div style="display: flex; gap: 10px;">
+            <a href="{{ url_for('surveyor_page') }}" class="btn" style="background: #6c757d; text-decoration: none; flex: 1;">
+                ❌ Batal
+            </a>
+            <button type="submit" class="btn btn-success" style="flex: 2;">
+                ✅ Setujui & Kirim ke Finance
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

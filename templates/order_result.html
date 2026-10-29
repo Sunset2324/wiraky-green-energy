@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Hasil Pengajuan - Wiraky{% endblock %}
+
+{% block content %}
+<div class="card">
+    {% if result.success %}
+    <div class="alert alert-success">
+        <h2 style="color: #155724; margin-top: 0;">✅ Pengajuan Berhasil Dikirim!</h2>
+        <p>Data Additional Cost telah diterima oleh Sistem Keuangan Wiraky.</p>
+        
+        <table style="margin-top: 15px;">
+            <tr><td style="width: 200px;"><b>Nomor Order</b></td><td>{{ order_id }}</td></tr>
+            <tr><td><b>Additional Cost ID</b></td><td>{{ additional_cost_id }}</td></tr>
+            <tr><td><b>Finance Reference</b></td><td>{{ result.finance_reference or '-' }}</td></tr>
+            <tr><td><b>Status</b></td><td><span class="badge b-lunas">{{ result.status }}</span></td></tr>
+        </table>
+        
+        <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 6px; border-left: 4px solid #ffc107;">
+            <b>📱 Langkah Selanjutnya:</b>
+            <ul style="margin: 10px 0 0 20px;">
+                <li>Sistem Keuangan Wiraky akan membuat invoice resmi.</li>
+                <li>Pelanggan akan menerima WhatsApp dengan tautan pembayaran.</li>
+                <li>Setelah pembayaran terverifikasi, status akan otomatis berubah menjadi <b>PAID</b>.</li>
+                <li>Anda akan menerima notifikasi internal saat pembayaran lunas.</li>
+            </ul>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-error">
+        <h2 style="color: #721c24; margin-top: 0;">❌ Pengajuan Gagal Dikirim</h2>
+        <p><b>Error:</b> {{ result.error }}</p>
+        <p><b>Pesan:</b> {{ result.message }}</p>
+        
+        <div style="margin-top: 20px;">
+            <a href="{{ url_for('surveyor_page') }}" class="btn">
+                🔄 Coba Lagi
+            </a>
+        </div>
+    </div>
+    {% endif %}
+    
+    <div style="margin-top: 30px; text-align: center;">
+        <a href="{{ url_for('surveyor_page') }}" style="color: #003d79; text-decoration: none;">
+            ← Kembali ke Halaman Surveyor
+        </a>
+    </div>
+</div>
+{% endblock %}

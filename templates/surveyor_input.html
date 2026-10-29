@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+
 {% block title %}Input Survei - Wiraky{% endblock %}
 
 {% block content %}
@@ -6,24 +7,48 @@
     <h2>🛠️ Input Kebutuhan Tambahan</h2>
     <p>Silakan isi rincian material/jasa di luar paket standar IndiHome Aura.</p>
     
-    <form action="/process_order" method="POST">
-        <label>Nama Pelanggan</label>
-        <input type="text" name="customer_name" value="{{ customer_name }}" readonly>
+    <form action="{{ url_for('process_order') }}" method="POST">
+        <div class="form-group">
+            <label>Nama Pelanggan</label>
+            <input type="text" name="customer_name" value="{{ customer_name }}" required>
+        </div>
         
-        <label>Nomor Order Telkomsel</label>
-        <input type="text" name="order_id" placeholder="Contoh: ORD-12345" required>
-
-        <label>Pilih Material/Jasa (Master Price List)</label>
-        <select name="item_code" required>
-            {% for code, info in master_price.items() %}
-            <option value="{{ code }}">{{ info.name }} - Rp {{ "{:,}".format(info.price) }}</option>
-            {% endfor %}
-        </select>
-
-        <label>Alasan Teknis & Foto Pendukung</label>
-        <textarea name="reason" rows="3" placeholder="Jelaskan mengapa material ini diperlukan..."></textarea>
-
-        <button type="submit" class="btn">✅ Hitung & Ajukan Persetujuan</button>
+        <div class="form-group">
+            <label>Nomor WhatsApp Pelanggan</label>
+            <input type="text" name="customer_phone" placeholder="Contoh: +6281234567890" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Nomor Order Telkomsel</label>
+            <input type="text" name="order_id" placeholder="Contoh: WIR-2026-0001" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Paket IndiHome Aura</label>
+            <input type="text" name="package" value="IndiHome Aura 3500" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Pilih Material/Jasa (Master Price List)</label>
+            <select name="item_code" required>
+                <option value="">-- Pilih Material --</option>
+                {% for code, info in master_price.items() %}
+                <option value="{{ code }}">{{ info.name }} - Rp {{ "{:,}".format(info.price) }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Jumlah</label>
+            <input type="number" name="qty" value="1" min="1" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Alasan Teknis</label>
+            <textarea name="reason" rows="3" placeholder="Jelaskan mengapa material ini diperlukan..."></textarea>
+        </div>
+        
+        <button type="submit" class="btn btn-block">✅ Hitung & Lanjutkan ke Review</button>
     </form>
 </div>
 {% endblock %}

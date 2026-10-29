@@ -1,44 +1,45 @@
 """
 Client untuk mengirim data Additional Cost ke Sistem Keuangan Wiraky.
-Sesuai STANDAR_API_INTEGRATED v1.0 - Halaman 4 & 5.
+Sesuai STANDAR_API_INTEGRATED v1.0 - Halaman 4, 5, & 10.
 
 Endpoint: POST /api/v1/additional-costs
+Retry: GET /api/v1/additional-costs/{id}/status
 """
 
 import os
+import json
+import logging
 import requests
 from datetime import datetime, timezone
 from services.hmac_utils import sign_request, generate_timestamp, serialize_payload
 
+# Setup logger untuk modul ini
+logger = logging.getLogger('wiraky_finance_client')
 
-def send_additional_cost(payload: dict) -> dict:
+
+def send_additional_cost(payload: dict, retry_count: int = 0) -> dict:
     """
     Kirim pengajuan Additional Cost ke Sistem Keuangan Wiraky.
     
     Args:
         payload: Dict dengan struktur sesuai schema v1.0
-            - schema_version: "1.0"
-            - event_id: ID unik event (contoh: EVT-AC-2026-0001-R01)
-            - event_type: "ADDITIONAL_COST_APPROVED"
-            - occurred_at: ISO-8601 UTC
-            - source: "GREEN_ENERGY"
-            - order_id: ID order (contoh: WIR-2026-0001)
-            - additional_cost_id: ID additional cost (contoh: AC-2026-0001)
-            - revision: Integer (1, 2, 3, ...)
-            - customer: {name, whatsapp, package}
-            - additional_items: [{part_code, description, qty, unit, unit_price, subtotal}]
-            - total_amount: Float (harus > 0)
-            - currency: "IDR"
-            - approval: {status: "APPROVED", reference, approved_at}
-            - payment_status: "NOT_BILLED"
+        retry_count: Jumlah retry yang sudah dilakukan (untuk internal use)
     
     Returns:
-        Dict dengan hasil response:
-            - success: bool
-            - status_code: int
-            - finance_reference: str (jika success)
-            - error: str (jika gagal)
+        Dict dengan hasil response
     """
+    # ===== MODE SIMULASI (untuk testing lokal) =====
+    if os.getenv("SIMULATE_FINANCE_API", "false").lower() == "true":
+        logger.info(f"🧪 [SIMULASI] Finance API tidak dipanggil. Mode simulasi aktif.")
+        return {
+            "success": True,
+            "status_code": 202,
+            "finance_reference": f"FIN-SIM-{payload.get('additional_cost_id', 'UNKNOWN')}",
+            "message": "Pengajuan diterima (mode simulasi)",
+            "simulated": True
+        }
+    # ================================================
+    
     # Validasi bisnis sebelum kirim
     if payload.get("approval", {}).get("status") != "APPROVED":
         return {
@@ -108,8 +109,16 @@ def send_additional_cost(payload: dict) -> dict:
         "Idempotency-Key": payload.get("event_id")  # Sama dengan event_id untuk idempotency
     }
     
-    # Kirim request
+    # Kirim request dengan retry mechanism
+    max_retries = 3
+    retry_delay = 2  # detik
+    
     try:
+        logger.info(f"📤 Mengirim Additional Cost ke Finance API: {api_url}")
+        logger.info(f"   Event ID: {payload.get('event_id')}")
+        logger.info(f"   Order ID: {payload.get('order_id')}")
+        logger.info(f"   Amount: Rp {payload.get('total_amount'):,}")
+        
         response = requests.post(
             api_url,
             data=body_bytes,
@@ -121,20 +130,38 @@ def send_additional_cost(payload: dict) -> dict:
         if response.status_code == 202:
             # Success - pengajuan diterima
             data = response.json()
+            logger.info(f"✅ Finance API menerima pengajuan: {data.get('finance_reference')}")
             return {
                 "success": True,
                 "status_code": 202,
                 "finance_reference": data.get("finance_reference"),
                 "message": data.get("message", "Pengajuan diterima untuk diproses")
             }
+        elif response.status_code in [429, 500, 502, 503, 504]:
+            # Server error atau rate limit - retry
+            if retry_count < max_retries:
+                logger.warning(f"⚠️ Server error {response.status_code}, retry {retry_count + 1}/{max_retries}")
+                import time
+                time.sleep(retry_delay * (retry_count + 1))  # Exponential backoff
+                return send_additional_cost(payload, retry_count + 1)
+            else:
+                logger.error(f"❌ Max retries exceeded. Status: {response.status_code}")
+                return {
+                    "success": False,
+                    "status_code": response.status_code,
+                    "finance_reference": None,
+                    "error": f"MAX_RETRIES_EXCEEDED",
+                    "message": f"Gagal setelah {max_retries} percobaan"
+                }
         else:
-            # Error
+            # Client error (400, 401, 403, 422, dll)
             try:
                 error_data = response.json()
                 error_msg = error_data.get("error", error_data.get("message", str(response.text)))
             except:
                 error_msg = response.text
             
+            logger.error(f"❌ Finance API menolak: {response.status_code} - {error_msg}")
             return {
                 "success": False,
                 "status_code": response.status_code,
@@ -144,19 +171,36 @@ def send_additional_cost(payload: dict) -> dict:
             }
     
     except requests.exceptions.Timeout:
-        return {
-            "success": False,
-            "status_code": None,
-            "finance_reference": None,
-            "error": "TIMEOUT",
-            "message": "Request timeout setelah 15 detik"
-        }
-    except requests.exceptions.RequestException as e:
+        logger.error(f"️ Request timeout setelah 15 detik")
+        if retry_count < max_retries:
+            logger.warning(f"🔄 Retry timeout: {retry_count + 1}/{max_retries}")
+            import time
+            time.sleep(retry_delay)
+            return send_additional_cost(payload, retry_count + 1)
+        else:
+            return {
+                "success": False,
+                "status_code": None,
+                "finance_reference": None,
+                "error": "TIMEOUT",
+                "message": "Request timeout setelah 15 detik"
+            }
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"🔌 Connection error: {str(e)}")
         return {
             "success": False,
             "status_code": None,
             "finance_reference": None,
             "error": "NETWORK_ERROR",
+            "message": f"Gagal terhubung ke server: {str(e)}"
+        }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Request error: {str(e)}")
+        return {
+            "success": False,
+            "status_code": None,
+            "finance_reference": None,
+            "error": "REQUEST_ERROR",
             "message": str(e)
         }
 
@@ -164,10 +208,25 @@ def send_additional_cost(payload: dict) -> dict:
 def check_additional_cost_status(additional_cost_id: str) -> dict:
     """
     Cek status Additional Cost ke Finance API (untuk rekonsiliasi).
-    Sesuai PDF Halaman 3: "GET status pembayaran untuk rekonsiliasi jika callback hilang"
+    Sesuai PDF Halaman 3 & 10: "GET status pembayaran untuk rekonsiliasi jika callback hilang"
     
     Endpoint: GET /api/v1/additional-costs/{id}/status
     """
+    # Mode simulasi
+    if os.getenv("SIMULATE_FINANCE_API", "false").lower() == "true":
+        logger.info(f"🧪 [SIMULASI] Cek status dummy untuk: {additional_cost_id}")
+        return {
+            "success": True,
+            "status_code": 200,
+            "data": {
+                "additional_cost_id": additional_cost_id,
+                "status": "PAID",
+                "payment_status": "PAID",
+                "amount_paid": 0,
+                "paid_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            }
+        }
+    
     api_url = os.getenv("WIRAKY_FINANCE_API_URL")
     api_secret = os.getenv("WIRAKY_FINANCE_API_SECRET")
     
@@ -191,15 +250,19 @@ def check_additional_cost_status(additional_cost_id: str) -> dict:
     }
     
     try:
+        logger.info(f"🔍 Cek status Additional Cost: {additional_cost_id}")
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
+            data = response.json()
+            logger.info(f"✅ Status: {data.get('status')}")
             return {
                 "success": True,
                 "status_code": 200,
-                "data": response.json()
+                "data": data
             }
         else:
+            logger.error(f"❌ Gagal cek status: {response.status_code}")
             return {
                 "success": False,
                 "status_code": response.status_code,
@@ -207,6 +270,7 @@ def check_additional_cost_status(additional_cost_id: str) -> dict:
                 "message": response.text
             }
     except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Network error saat cek status: {str(e)}")
         return {
             "success": False,
             "error": "NETWORK_ERROR",

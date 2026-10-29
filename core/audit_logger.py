@@ -19,7 +19,7 @@ if not audit_logger.handlers:
     audit_logger.addHandler(file_handler)
 
 
-def log_audit(order_id: str, action: str, detail: str, actor: str = "SYSTEM"):
+def log_audit(order_id: str, action: str, detail: str, actor: text_str = "SYSTEM"):
     """
     Mencatat setiap perubahan status kritis untuk keperluan audit dan rekonsiliasi.
     Sesuai PDF Halaman 5: "Laporan transaksi dan audit dapat ditelusuri per order, 
