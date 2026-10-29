@@ -9,17 +9,18 @@ load_dotenv()
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
 # --- KONFIGURASI GATEWAY ---
-XENDIT_API_KEY = os.getenv('XENDIT_API_KEY', 'xnd_development_xxxxx')
+# Nama variabel di .env adalah XENDIT_SECRET_KEY (XENDIT_API_KEY tetap didukung sebagai fallback)
+XENDIT_API_KEY = os.getenv('XENDIT_SECRET_KEY') or os.getenv('XENDIT_API_KEY', '')
 
-# Inisialisasi Client Xendit (Cara standar v5/v6)
-try:
-    from xendit import Client
-    xendit_client = Client(api_key=XENDIT_API_KEY)
-except ImportError:
-    # Fallback untuk versi lama
-    import xendit
-    xendit.api_key = XENDIT_API_KEY
-    xendit_client = None
+# Inisialisasi Xendit SDK v5 (xendit-python==5.0.0):
+# tidak ada xendit.Client / xendit.Invoice lagi, pakai InvoiceApi + CreateInvoiceRequest
+import xendit
+from xendit.invoice import InvoiceApi
+from xendit.invoice.model.create_invoice_request import CreateInvoiceRequest
+from xendit.invoice.model.customer_object import CustomerObject
+
+xendit.set_api_key(XENDIT_API_KEY)
+invoice_api = InvoiceApi()
 
 # --- MASTER PRICE LIST (Sesuai Halaman 1 & 5) ---
 MASTER_PRICE = {
@@ -73,38 +74,29 @@ def create_invoice():
         
     item_info = MASTER_PRICE[item_code]
     
+    if not XENDIT_API_KEY:
+        return ("<h3>Error Konfigurasi:</h3> <pre>XENDIT_SECRET_KEY belum diisi di .env</pre>"), 500
+
     try:
-        # 1. Request ke Xendit
-        invoice_data = {
-            "external_id": f"WRK-{os.urandom(4).hex()}",
-            "amount": item_info['price'],
-            "description": f"Additional Cost: {item_info['name']}",
-            "customer": {
-                "given_names": CUSTOMER['given_names'],
-                "surname": CUSTOMER['surname'],
-                "email": CUSTOMER['email'],
-                "mobile_number": CUSTOMER['mobile_number']
-            },
-            "success_redirect_url": "https://wiraky.com/success",
-            "failure_redirect_url": "https://wiraky.com/failure"
-        }
+        # 1. Request ke Xendit (SDK v5)
+        invoice_request = CreateInvoiceRequest(
+            external_id=f"WRK-{os.urandom(4).hex()}",
+            amount=float(item_info['price']),
+            description=f"Additional Cost: {item_info['name']}",
+            customer=CustomerObject(
+                given_names=CUSTOMER['given_names'],
+                surname=CUSTOMER['surname'],
+                email=CUSTOMER['email'],
+                mobile_number=CUSTOMER['mobile_number'],
+            ),
+            success_redirect_url="https://wiraky.com/success",
+            failure_redirect_url="https://wiraky.com/failure",
+        )
+        invoice_response = invoice_api.create_invoice(invoice_request)
 
-        # Panggil API sesuai versi library
-        if xendit_client:
-            # Cara v6+: Melalui object client
-            invoice_response = xendit_client.Invoice.create(**invoice_data)
-        else:
-            # Cara v5-: Melalui module xendit langsung
-            import xendit
-            invoice_response = xendit.Invoice.create(**invoice_data)
-
-        # Ambil data dari response (bisa berupa dict atau object)
-        if isinstance(invoice_response, dict):
-            invoice_url = invoice_response.get('invoice_url')
-            invoice_id = invoice_response.get('id') or invoice_response.get('external_id')
-        else:
-            invoice_url = getattr(invoice_response, 'invoice_url', None)
-            invoice_id = getattr(invoice_response, 'id', None) or getattr(invoice_response, 'external_id', None)
+        # Response v5 berupa model object (bukan dict)
+        invoice_url = getattr(invoice_response, 'invoice_url', None)
+        invoice_id = getattr(invoice_response, 'id', None) or getattr(invoice_response, 'external_id', None)
 
         if not invoice_url:
             raise Exception("Gagal mendapatkan URL pembayaran dari Xendit.")
