@@ -1,42 +1,103 @@
 {% extends "base.html" %}
 {% block title %}Dashboard Internal - Wiraky{% endblock %}
+{% block head %}{% if auto %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
 
 {% block content %}
+{% if msg %}<div class="alert alert-info">{{ msg }}</div>{% endif %}
+
 <div class="card">
     <h2>📊 Monitoring Additional Cost</h2>
+    <p class="muted">
+        Mode integrasi: <b>{{ mode }}</b>{% if has_simulator %} (Finance disimulasikan){% endif %} ·
+        {% if auto %}<a href="/dashboard">matikan auto-refresh</a>{% else %}<a href="/dashboard?auto=1">auto-refresh 3 dtk</a>{% endif %}
+        · <a href="/surveyor">+ Pengajuan baru</a>
+    </p>
+    <div class="scroll">
     <table>
         <thead>
-            <tr>
-                <th>Order ID</th>
-                <th>Pelanggan</th>
-                <th>Nominal</th>
-                <th>Status</th>
-                <th>Aksi</th>
-            </tr>
+            <tr><th>ID / Rev</th><th>Order</th><th>Pelanggan</th><th>Nominal</th><th>Status</th><th>Finance Ref</th><th>Aksi</th></tr>
         </thead>
         <tbody>
-            {% for order in orders %}
-            <tr>
-                <td>{{ order.order_id }}</td>
-                <td>{{ order.customer_name }}</td>
-                <td>Rp {{ "{:,}".format(order.amount) }}</td>
-                <td>
-                    {% if order.status == 'LUNAS' %}
-                        <span class="badge b-lunas">LUNAS ✅</span>
-                    {% else %}
-                        <span class="badge b-pending">{{ order.status }}</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if order.status == 'LUNAS' %}
-                        <button style="padding: 5px 10px; cursor: pointer;">Jadwalkan Pasang</button>
-                    {% else %}
-                        -
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
+        {% for c in costs %}
+        <tr class="{% if c.superseded %}row-muted{% elif c.additional_cost_id == focus %}row-focus{% endif %}">
+            <td><a href="/dashboard/{{ c.additional_cost_id }}{% if auto %}?auto=1{% endif %}">{{ c.additional_cost_id }}</a> <span class="muted">R{{ c.revision }}</span></td>
+            <td>{{ c.order_id }}</td>
+            <td>{{ c.customer.name }}</td>
+            <td>{{ c.total_amount | rupiah }}</td>
+            <td>
+                <span class="badge {{ c.status | badge }}">{{ c.status }}{% if c.status == 'PAID' %} ✅{% endif %}</span>
+                {% if c.superseded %}<span class="badge b-muted">digantikan</span>{% endif %}
+                {% if c.needs_review %}<span class="badge b-danger">perlu review</span>{% endif %}
+            </td>
+            <td class="mono">{{ c.finance_reference or '-' }}</td>
+            <td>
+                {% if not c.superseded and c.status in ['RECEIVED', 'PAYMENT_PENDING'] %}
+                <form method="post" action="/dashboard/reconcile/{{ c.additional_cost_id }}">
+                    <button class="btn btn-sm btn-blue" type="submit">Cek status ke Finance</button>
+                </form>
+                {% endif %}
+                {% if not c.superseded and c.status in ['RECEIVED', 'PAYMENT_PENDING', 'FAILED', 'EXPIRED'] %}
+                <a class="btn btn-sm btn-gray" style="text-decoration:none; display:inline-block;" href="/surveyor?revise={{ c.additional_cost_id }}">Revisi</a>
+                {% endif %}
+                {% if c.status == 'PAID' %}<span class="muted">siap dijadwalkan pasang</span>{% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="muted">Belum ada data. Buat pengajuan lewat halaman Surveyor.</td></tr>
+        {% endfor %}
         </tbody>
     </table>
+    </div>
+</div>
+
+{% if outbox %}
+<div class="card">
+    <h2>📤 Outbox (belum terkirim)</h2>
+    <table>
+        <thead><tr><th>Event</th><th>Status</th><th>Percobaan</th><th>Berikutnya</th><th>Error terakhir</th></tr></thead>
+        <tbody>
+        {% for e in outbox %}
+        <tr>
+            <td class="mono">{{ e.event_id }}</td>
+            <td><span class="badge {{ 'b-danger' if e.state == 'FAILED' else 'b-pending' }}">{{ e.state }}</span></td>
+            <td>{{ e.attempts }}</td>
+            <td>{{ e.next_attempt_at | wib }}</td>
+            <td class="mono">{{ e.last_error or '-' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <form method="post" action="/dashboard/outbox/process"><button class="btn btn-sm" type="submit">Proses outbox sekarang</button></form>
+</div>
+{% endif %}
+
+{% if alerts %}
+<div class="card" style="border-top-color:#c0392b;">
+    <h2>🔔 Notifikasi Admin</h2>
+    {% for a in alerts %}
+    <div class="alert alert-error"><b>{{ a.code }}</b> · {{ a.at | wib }}<br>{{ a.message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>🧾 Audit log terbaru</h2>
+    <div class="scroll">
+    <table>
+        <thead><tr><th>Waktu</th><th>Aksi</th><th>Oleh</th><th>Referensi</th></tr></thead>
+        <tbody>
+        {% for a in audit %}
+        <tr>
+            <td class="mono">{{ a.at | wib }}</td>
+            <td class="mono">{{ a.action }}</td>
+            <td class="mono">{{ a.actor }}</td>
+            <td class="mono">{{ a.additional_cost_id or '-' }}{% if a.revision %} R{{ a.revision }}{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="muted">Belum ada aktivitas.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
 </div>
 {% endblock %}
