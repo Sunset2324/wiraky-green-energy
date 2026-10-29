@@ -1,120 +1,236 @@
+"""
+Webhook receiver untuk menerima callback PAYMENT_CONFIRMED dari Sistem Keuangan Wiraky.
+Sesuai STANDAR_API_INTEGRATED v1.0 - Halaman 6, 7, & 8.
+
+Endpoint: POST /api/v1/finance/payment-events
+"""
+
 from flask import Blueprint, request, jsonify
-from services.gateway_service import verify_webhook_signature, check_payment_status
-from services.whatsapp_service import send_whatsapp_notification
-from core.database import get_db_connection # Asumsi ada fungsi ini
-from core.audit_logger import log_audit # Asumsi ada fungsi log
+from services.hmac_utils import verify_signature, is_timestamp_fresh
+from core.database import get_db_connection
+from core.audit_logger import log_audit
+import os
+import json
 
-webhook_bp = Blueprint('webhook', __name__)
+finance_webhook_bp = Blueprint('finance_webhook', __name__)
 
-@webhook_bp.route('/xendit', methods=['POST'])
-def handle_xendit_webhook():
+
+def validate_and_record_payment(event: dict) -> dict:
     """
-    Endpoint untuk menerima notifikasi dari Payment Gateway.
+    Validasi bisnis dan simpan status pembayaran ke database.
+    Sesuai PDF Halaman 8:
+    1. Cari order + additional_cost_id + revision yang approved
+    2. Cocokkan invoice, total_amount, currency, payment_reference
+    3. Jika event_id sudah diproses, return DUPLICATE
+    4. Simpan status dan audit dalam SATU transaksi database
     """
-    payload = request.get_json() or request.form.to_dict()
-    
-    # 1. Ambil Signature dari Header (Sesuaikan dengan nama header gateway, misal: x-callback-token)
-    signature = request.headers.get('x-callback-token', '')
-    
-    # 2. Verifikasi Keamanan (Sesuai PDF: memverifikasi signature/secret)
-    if not verify_webhook_signature(payload, signature):
-        return jsonify({"error": "Unauthorized: Invalid signature"}), 401
-
-    # 3. Ekstrak Data Penting
-    external_id = payload.get('external_id')  # Ini adalah WRK-INV-{order_id} kita
-    gateway_payment_id = payload.get('id')
-    status = payload.get('status')            # e.g., 'PAID', 'EXPIRED'
-    amount_paid = payload.get('amount', 0)
-    payment_method = payload.get('payment_method', 'Unknown')
-
-    # 4. Hubungkan ke Database
     conn = get_db_connection()
     if not conn:
-        return jsonify({"error": "Database connection failed"}), 500
+        return {"result": "ERROR", "message": "Database connection failed"}
     
     cursor = conn.cursor(dictionary=True)
     
     try:
-        # Ambil data invoice berdasarkan external_id
-        cursor.execute("SELECT * FROM invoices WHERE external_id = %s", (external_id,))
-        invoice = cursor.fetchone()
+        event_id = event.get("event_id")
+        order_id = event.get("order_id")
+        additional_cost_id = event.get("additional_cost_id")
+        revision = event.get("revision")
+        invoice_id = event.get("invoice_id")
+        payment_reference = event.get("payment_reference")
+        amount_paid = event.get("amount_paid")
+        currency = event.get("currency")
+        paid_at = event.get("paid_at")
         
-        if not invoice:
-            return jsonify({"error": "Invoice not found"}), 404
-
-        order_id = invoice['order_id']
-        expected_amount = invoice['amount']
-        current_status = invoice['status']
-
-        # 5. IDEMPOTENSI (Sesuai PDF Halaman 4)
-        # Jika status sudah LUNAS, abaikan proses, tapi tetap return 200 OK agar gateway tidak retry terus.
-        if current_status == 'LUNAS':
-            print(f"[Idempotency] Webhook diabaikan, invoice {external_id} sudah LUNAS.")
-            return jsonify({"status": "ignored_already_paid"}), 200
-
-        # 6. Validasi Bisnis
-        if status == 'PAID':
-            if amount_paid < expected_amount:
-                # Sesuai PDF: "PERLU PEMERIKSAAN" jika nominal tidak cocok
-                cursor.execute(
-                    "UPDATE invoices SET status = 'PERLU PEMERIKSAAN' WHERE external_id = %s", 
-                    (external_id,)
-                )
-                conn.commit()
-                log_audit(order_id, "WEBHOOK_AMOUNT_MISMATCH", f"Expected: {expected_amount}, Got: {amount_paid}")
-                return jsonify({"status": "amount_mismatch"}), 200
-
-            # 7. Update Status ke LUNAS secara Atomik
-            cursor.execute(
-                """UPDATE invoices 
-                   SET status = 'LUNAS', 
-                       gateway_payment_id = %s, 
-                       paid_at = NOW(), 
-                       payment_method = %s 
-                   WHERE external_id = %s AND status != 'LUNAS'""",
-                (gateway_payment_id, payment_method, external_id)
-            )
-            conn.commit()
-            
-            # 8. Audit Log
-            log_audit(order_id, "PAYMENT_VERIFIED", f"Gateway ID: {gateway_payment_id}")
-
-            # 9. Trigger Notifikasi WhatsApp (Template B & E)
-            # Ambil data pelanggan untuk notifikasi
-            cursor.execute("SELECT customer_name, customer_phone FROM orders WHERE id = %s", (order_id,))
-            customer = cursor.fetchone()
-            
-            wa_data = {
-                "nama": customer['customer_name'],
-                "order_id": order_id,
-                "invoice_id": external_id,
-                "nominal": amount_paid,
-                "waktu_bayar": payload.get('paid_at', 'Baru saja'),
-                "metode": payment_method,
-                "kuitansi_link": f"{os.getenv('APP_URL')}/receipt/{external_id}"
+        # 1. Cek idempotency - apakah event_id sudah pernah diproses?
+        cursor.execute(
+            "SELECT id FROM finance_events WHERE event_id = %s",
+            (event_id,)
+        )
+        existing_event = cursor.fetchone()
+        
+        if existing_event:
+            # Event sudah diproses - return DUPLICATE (idempotent)
+            return {
+                "result": "DUPLICATE",
+                "message": "Event already processed",
+                "event_id": event_id
             }
-            
-            # Kirim ke Pelanggan (Template B)
-            send_whatsapp_notification(customer['customer_phone'], "B", wa_data)
-            
-            # Kirim ke Internal Pak Yudi/Finance (Template E)
-            internal_phone = os.getenv("INTERNAL_COORDINATOR_PHONE") # No HP Pak Yudi/Finance
-            send_whatsapp_notification(internal_phone, "E", wa_data)
-
-            return jsonify({"status": "success", "message": "Payment verified and notifications queued"}), 200
-
-        elif status == 'EXPIRED':
-            cursor.execute("UPDATE invoices SET status = 'KEDALUWARSA' WHERE external_id = %s", (external_id,))
-            conn.commit()
-            # Opsional: Kirim Template D
-            return jsonify({"status": "expired"}), 200
-
-        return jsonify({"status": "ignored"}), 200
-
+        
+        # 2. Cari order dan additional cost yang approved
+        cursor.execute("""
+            SELECT ac.*, o.customer_name, o.customer_phone
+            FROM additional_costs ac
+            JOIN orders o ON ac.order_id = o.id
+            WHERE ac.additional_cost_id = %s 
+              AND ac.revision = %s
+              AND ac.status IN ('APPROVED', 'SENT', 'PAYMENT_PENDING')
+        """, (additional_cost_id, revision))
+        
+        additional_cost = cursor.fetchone()
+        
+        if not additional_cost:
+            return {
+                "result": "NOT_FOUND",
+                "message": "Additional cost not found or not approved"
+            }
+        
+        # 3. Validasi nominal dan currency
+        expected_amount = additional_cost.get("total_amount")
+        if abs(amount_paid - expected_amount) > 0.01:
+            # Nominal tidak cocok - log dan tolak
+            log_audit(
+                order_id,
+                "PAYMENT_AMOUNT_MISMATCH",
+                f"Expected: {expected_amount}, Got: {amount_paid}, Invoice: {invoice_id}"
+            )
+            return {
+                "result": "AMOUNT_MISMATCH",
+                "message": "Payment amount does not match approved amount"
+            }
+        
+        if currency != "IDR":
+            return {
+                "result": "INVALID_CURRENCY",
+                "message": "Currency must be IDR"
+            }
+        
+        # 4. Update status ke PAID dalam transaksi atomik
+        cursor.execute("""
+            UPDATE additional_costs 
+            SET status = 'PAID',
+                finance_reference = %s,
+                invoice_id = %s,
+                payment_reference = %s,
+                amount_paid = %s,
+                paid_at = %s,
+                updated_at = NOW()
+            WHERE additional_cost_id = %s AND revision = %s
+        """, (
+            event.get("finance_reference") or additional_cost.get("finance_reference"),
+            invoice_id,
+            payment_reference,
+            amount_paid,
+            paid_at,
+            additional_cost_id,
+            revision
+        ))
+        
+        # 5. Catat event untuk idempotency
+        cursor.execute("""
+            INSERT INTO finance_events 
+            (event_id, event_type, order_id, additional_cost_id, revision, 
+             invoice_id, payment_reference, amount_paid, currency, paid_at, 
+             raw_payload, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        """, (
+            event_id,
+            event.get("event_type"),
+            order_id,
+            additional_cost_id,
+            revision,
+            invoice_id,
+            payment_reference,
+            amount_paid,
+            currency,
+            paid_at,
+            json.dumps(event)
+        ))
+        
+        # 6. Commit transaksi
+        conn.commit()
+        
+        # 7. Audit log
+        log_audit(
+            order_id,
+            "PAYMENT_CONFIRMED",
+            f"Event: {event_id}, Invoice: {invoice_id}, Amount: {amount_paid}, Ref: {payment_reference}"
+        )
+        
+        # 8. Notifikasi internal (opsional - bisa ditambahkan nanti)
+        # send_internal_notification(additional_cost, event)
+        
+        return {
+            "result": "SUCCESS",
+            "message": "Payment recorded successfully",
+            "order_id": order_id,
+            "additional_cost_id": additional_cost_id
+        }
+    
     except Exception as e:
         conn.rollback()
-        print(f"[Webhook Error] {str(e)}")
-        return jsonify({"error": "Internal server error"}), 500
+        log_audit(
+            event.get("order_id", "UNKNOWN"),
+            "PAYMENT_RECORD_ERROR",
+            f"Event: {event.get('event_id')}, Error: {str(e)}"
+        )
+        return {
+            "result": "ERROR",
+            "message": str(e)
+        }
     finally:
         cursor.close()
         conn.close()
+
+
+@finance_webhook_bp.route('/payment-events', methods=['POST'])
+def finance_payment_webhook():
+    """
+    Endpoint untuk menerima webhook PAYMENT_CONFIRMED dari Sistem Keuangan Wiraky.
+    Sesuai PDF Halaman 7 & 8.
+    """
+    # Ambil raw body dan headers
+    body_bytes = request.get_data(cache=False)
+    timestamp = request.headers.get("X-Timestamp", "")
+    signature = request.headers.get("X-Signature", "")
+    
+    # 1. Validasi timestamp freshness (mencegah replay attack)
+    if not is_timestamp_fresh(timestamp, max_age_seconds=300):
+        return jsonify({"error": "INVALID_TIMESTAMP"}), 401
+    
+    # 2. Validasi signature HMAC-SHA256
+    callback_secret = os.getenv("WIRAKY_FINANCE_CALLBACK_SECRET")
+    if not callback_secret:
+        return jsonify({"error": "CONFIG_MISSING"}), 500
+    
+    if not verify_signature(callback_secret, timestamp, body_bytes, signature):
+        return jsonify({"error": "INVALID_SIGNATURE"}), 401
+    
+    # 3. Parse JSON body
+    try:
+        event = json.loads(body_bytes)
+    except ValueError:
+        return jsonify({"error": "INVALID_JSON"}), 400
+    
+    # 4. Validasi event_type
+    if event.get("event_type") != "PAYMENT_CONFIRMED":
+        return jsonify({"error": "INVALID_EVENT_TYPE"}), 422
+    
+    # 5. Validasi currency
+    if event.get("currency") != "IDR":
+        return jsonify({"error": "INVALID_CURRENCY"}), 422
+    
+    # 6. Jika status bukan PAID, catat saja (tidak update ke LUNAS)
+    if event.get("payment_status") != "PAID":
+        # Catat status informatif (PENDING, FAILED, EXPIRED, dll)
+        log_audit(
+            event.get("order_id", "UNKNOWN"),
+            "PAYMENT_STATUS_UPDATE",
+            f"Event: {event.get('event_id')}, Status: {event.get('payment_status')}"
+        )
+        return jsonify({"result": "NOT_PAID"}), 200
+    
+    # 7. Validasi bisnis dan simpan ke database
+    result = validate_and_record_payment(event)
+    
+    # 8. Return response sesuai hasil
+    if result.get("result") == "SUCCESS":
+        return jsonify(result), 200
+    elif result.get("result") == "DUPLICATE":
+        # Idempotent - return 200 OK tanpa error
+        return jsonify(result), 200
+    elif result.get("result") == "AMOUNT_MISMATCH":
+        return jsonify(result), 409  # Conflict
+    elif result.get("result") == "NOT_FOUND":
+        return jsonify(result), 404
+    else:
+        return jsonify(result), 500
