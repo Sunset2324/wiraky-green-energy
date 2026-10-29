@@ -13,10 +13,6 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 # Nama variabel di .env adalah XENDIT_SECRET_KEY (XENDIT_API_KEY tetap didukung sebagai fallback)
 XENDIT_API_KEY = os.getenv('XENDIT_SECRET_KEY') or os.getenv('XENDIT_API_KEY', '')
 
-# Verification token dari Xendit Dashboard (Settings > Webhooks), dikirim Xendit
-# di header "x-callback-token". Tanpa ini, webhook akan menolak semua request.
-XENDIT_CALLBACK_TOKEN = os.getenv('XENDIT_CALLBACK_TOKEN', '')
-
 # Inisialisasi Xendit SDK v5 (xendit-python==5.0.0):
 # tidak ada xendit.Client / xendit.Invoice lagi, pakai InvoiceApi + CreateInvoiceRequest
 import xendit
