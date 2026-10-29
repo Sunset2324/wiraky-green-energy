@@ -2,7 +2,6 @@ import os
 import json
 from flask import Flask, request, jsonify, render_template_string
 from dotenv import load_dotenv
-from xendit import XenditClient
 
 # Load konfigurasi dari .env
 load_dotenv()
@@ -11,7 +10,16 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 
 # --- KONFIGURASI GATEWAY ---
 XENDIT_API_KEY = os.getenv('XENDIT_API_KEY', 'xnd_development_xxxxx')
-xendit_client = XenditClient(api_key=XENDIT_API_KEY)
+
+# Inisialisasi Client Xendit (Cara standar v5/v6)
+try:
+    from xendit import Client
+    xendit_client = Client(api_key=XENDIT_API_KEY)
+except ImportError:
+    # Fallback untuk versi lama
+    import xendit
+    xendit.api_key = XENDIT_API_KEY
+    xendit_client = None
 
 # --- MASTER PRICE LIST (Sesuai Halaman 1 & 5) ---
 MASTER_PRICE = {
@@ -59,21 +67,48 @@ def surveyor_input():
 def create_invoice():
     """Halaman 2, 3 & 4: Persetujuan & Generate Link Pembayaran"""
     item_code = request.form.get('item_code')
+    
+    if item_code not in MASTER_PRICE:
+        return "<h3>Error:</h3> Kode material tidak valid.", 400
+        
     item_info = MASTER_PRICE[item_code]
     
     try:
         # 1. Request ke Xendit
-        invoice = xendit_client.Invoice.create(
-            amount=item_info['price'],
-            description=f"Additional Cost: {item_info['name']}",
-            customer=CUSTOMER,
-            success_redirect_url="https://wiraky.com/success",
-            failure_redirect_url="https://wiraky.com/failure"
-        )
-        
-        invoice_url = invoice['invoice_url']
-        invoice_id = invoice['id']
-        
+        invoice_data = {
+            "external_id": f"WRK-{os.urandom(4).hex()}",
+            "amount": item_info['price'],
+            "description": f"Additional Cost: {item_info['name']}",
+            "customer": {
+                "given_names": CUSTOMER['given_names'],
+                "surname": CUSTOMER['surname'],
+                "email": CUSTOMER['email'],
+                "mobile_number": CUSTOMER['mobile_number']
+            },
+            "success_redirect_url": "https://wiraky.com/success",
+            "failure_redirect_url": "https://wiraky.com/failure"
+        }
+
+        # Panggil API sesuai versi library
+        if xendit_client:
+            # Cara v6+: Melalui object client
+            invoice_response = xendit_client.Invoice.create(**invoice_data)
+        else:
+            # Cara v5-: Melalui module xendit langsung
+            import xendit
+            invoice_response = xendit.Invoice.create(**invoice_data)
+
+        # Ambil data dari response (bisa berupa dict atau object)
+        if isinstance(invoice_response, dict):
+            invoice_url = invoice_response.get('invoice_url')
+            invoice_id = invoice_response.get('id') or invoice_response.get('external_id')
+        else:
+            invoice_url = getattr(invoice_response, 'invoice_url', None)
+            invoice_id = getattr(invoice_response, 'id', None) or getattr(invoice_response, 'external_id', None)
+
+        if not invoice_url:
+            raise Exception("Gagal mendapatkan URL pembayaran dari Xendit.")
+
         # 2. Simulasi Template WA A (Halaman 2)
         wa_msg = f"""
         Yth. Bapak/Ibu {CUSTOMER['given_names']},
@@ -100,7 +135,7 @@ def create_invoice():
         ''', msg=wa_msg, url=invoice_url)
 
     except Exception as e:
-        return f"<h3>Error:</h3> {str(e)}"
+        return f"<h3>Error Integrasi Xendit:</h3> <pre>{str(e)}</pre><br><small>Pastikan API Key di .env sudah benar dan library xendit-python terinstall.</small>"
 
 @app.route('/webhook/xendit', methods=['POST'])
 def webhook_handler():
@@ -111,7 +146,6 @@ def webhook_handler():
     print(f"🔔 Webhook Masuk: Status {status}")
 
     if status == 'PAID':
-        # Logika Idempotensi & Verifikasi (Halaman 4)
         print("✅ VERIFIKASI SUKSES: Pembayaran sah.")
         print("📱 Mengirim WA Template B (Lunas)...")
         print("📢 Notifikasi Internal ke Pak Yudi...")
