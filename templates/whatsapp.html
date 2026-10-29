@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Notifikasi WhatsApp - Wiraky{% endblock %}
+
+{% block content %}
+{% if msg %}<div class="alert alert-info">{{ msg }}</div>{% endif %}
+{% if mode == 'LOG' %}
+<div class="alert alert-warn"><b>Mode LOG</b>: tidak ada pesan WhatsApp nyata yang dikirim. Pesan hanya dicatat di sini
+    sebagai pratinjau. Untuk mengirim sungguhan isi WA_ENABLED=1 beserta kredensial Meta (lihat docs/WA_BUSINESS_SETUP.md).</div>
+{% else %}
+<div class="alert alert-info"><b>Mode CLOUD_API</b>: pesan template dikirim lewat WhatsApp Business Cloud API ({{ wa.api_version }}).</div>
+{% endif %}
+
+<div class="card">
+    <h2>💬 Notifikasi WhatsApp ke pelanggan</h2>
+    <p class="muted">Notifikasi bersifat informatif; kegagalan WhatsApp tidak mengubah status pembayaran.
+        <a href="/dashboard">← dashboard</a></p>
+    <form method="post" action="/whatsapp/process"><button class="btn btn-sm" type="submit">Proses antrean sekarang</button></form>
+    <div class="scroll">
+    <table>
+        <thead><tr><th>Waktu</th><th>Tagihan</th><th>Jenis</th><th>Tujuan</th><th>Status kirim</th><th>Status terima</th><th>Pratinjau pesan</th></tr></thead>
+        <tbody>
+        {% for n in items %}
+        <tr>
+            <td class="mono">{{ n.created_at | wib }}</td>
+            <td><a href="/dashboard/{{ n.additional_cost_id }}">{{ n.additional_cost_id }}</a> <span class="muted">R{{ n.revision }}</span></td>
+            <td class="mono">{{ n.kind }}<br><span class="muted">{{ n.template }}</span></td>
+            <td class="mono">***{{ n.to[-4:] }}</td>
+            <td><span class="badge {{ 'b-lunas' if n.state == 'SENT' else ('b-danger' if n.state == 'FAILED' else 'b-pending') }}">{{ n.state }}</span>
+                {% if n.attempts %}<span class="muted">x{{ n.attempts }}</span>{% endif %}
+                {% if n.simulated %}<span class="badge b-muted">log</span>{% endif %}
+                {% if n.last_error %}<br><span class="mono muted">{{ n.last_error }}</span>{% endif %}</td>
+            <td>{{ n.delivery_status or '-' }}</td>
+            <td>{{ n.preview }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="muted">Belum ada notifikasi. Notifikasi dibuat saat tagihan RECEIVED dan saat PAID.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

@@ -149,3 +149,66 @@ def load_integration_settings(env: Mapping[str, str] = None) -> IntegrationSetti
         worker_interval=_number(env, "WORKER_INTERVAL", 1.0, float),
         expected_verifier=str(env.get("FINANCE_VERIFIED_BY", "")).strip() or "WIRAKY_FINANCE_SYSTEM",
     )
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp Business (Cloud API) - notifikasi ke pelanggan
+# ---------------------------------------------------------------------------
+
+@dataclass
+class WhatsAppSettings:
+    mode: str                     # "LOG" (tidak kirim apa pun, hanya catat) atau "CLOUD_API"
+    api_version: str
+    phone_number_id: str
+    access_token: str
+    app_secret: str               # untuk verifikasi X-Hub-Signature-256 webhook Meta
+    verify_token: str             # untuk handshake GET webhook Meta
+    language: str
+    template_bill_issued: str
+    template_payment_confirmed: str
+    notify_kinds: tuple
+    max_attempts: int = 5
+    backoff_base: float = 5.0
+    backoff_cap: float = 600.0
+    request_timeout: float = 15.0
+
+    @property
+    def messages_url(self) -> str:
+        return f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}/messages"
+
+
+def load_whatsapp_settings(env: Mapping[str, str] = None) -> WhatsAppSettings:
+    """Default mode LOG: aman untuk demo, tidak ada pesan nyata terkirim.
+
+    Mode CLOUD_API aktif hanya bila WA_ENABLED=1; saat itu WA_PHONE_NUMBER_ID dan WA_ACCESS_TOKEN wajib.
+    """
+    env = os.environ if env is None else env
+    enabled = _truthy(env.get("WA_ENABLED"), False)
+    phone_id = str(env.get("WA_PHONE_NUMBER_ID", "")).strip()
+    token = str(env.get("WA_ACCESS_TOKEN", "")).strip()
+    if enabled:
+        missing = [n for n, v in (("WA_PHONE_NUMBER_ID", phone_id), ("WA_ACCESS_TOKEN", token)) if not v]
+        if missing:
+            raise ConfigError("WA_ENABLED=1 tetapi belum diisi: " + ", ".join(missing))
+        if not phone_id.isdigit():
+            raise ConfigError("WA_PHONE_NUMBER_ID harus berupa angka (Phone number ID dari Meta, bukan nomor telepon).")
+    kinds = tuple(k.strip().upper() for k in str(env.get("WA_NOTIFY_KINDS", "BILL_ISSUED,PAYMENT_CONFIRMED")).split(",")
+                  if k.strip())
+    unknown = [k for k in kinds if k not in ("BILL_ISSUED", "PAYMENT_CONFIRMED")]
+    if unknown:
+        raise ConfigError("WA_NOTIFY_KINDS tidak dikenal: " + ", ".join(unknown))
+    return WhatsAppSettings(
+        mode="CLOUD_API" if enabled else "LOG",
+        api_version=str(env.get("WA_API_VERSION", "")).strip() or "v21.0",
+        phone_number_id=phone_id, access_token=token,
+        app_secret=str(env.get("WA_APP_SECRET", "")).strip(),
+        verify_token=str(env.get("WA_VERIFY_TOKEN", "")).strip(),
+        language=str(env.get("WA_TEMPLATE_LANGUAGE", "")).strip() or "id",
+        template_bill_issued=str(env.get("WA_TEMPLATE_BILL_ISSUED", "")).strip() or "additional_cost_bill",
+        template_payment_confirmed=str(env.get("WA_TEMPLATE_PAYMENT_CONFIRMED", "")).strip() or "additional_cost_paid",
+        notify_kinds=kinds,
+        max_attempts=_number(env, "WA_MAX_ATTEMPTS", 5),
+        backoff_base=_number(env, "WA_BACKOFF_BASE", 5.0, float),
+        backoff_cap=_number(env, "WA_BACKOFF_CAP", 600.0, float),
+        request_timeout=_number(env, "WA_REQUEST_TIMEOUT", 15.0, float),
+    )

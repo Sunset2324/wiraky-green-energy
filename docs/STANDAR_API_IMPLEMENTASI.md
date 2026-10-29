@@ -1,7 +1,8 @@
 # Implementasi Standar API Integrated v1.0 (Green Energy ↔ Finance Wiraky)
 
 Entry point: `python app.py` (atau `APP_ENTRY=app.py ./start_demo.sh`). `demo_final.py` (demo Xendit) tidak diubah.
-Tes UAT otomatis: `python -m unittest discover -s tests -v` (63 skenario, positif + negatif).
+Tes UAT otomatis: `python -m unittest discover -s tests -v` (84 skenario, positif + negatif, termasuk WhatsApp).
+Notifikasi WhatsApp Business: lihat `docs/WA_BUSINESS_SETUP.md`.
 
 ## Pemetaan standar → kode
 | Bagian standar | Implementasi |

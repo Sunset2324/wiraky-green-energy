@@ -17,7 +17,7 @@ class InMemoryRepository:
     def __init__(self):
         self._lock = threading.RLock()
         self._depth = 0
-        self._state = {"costs": {}, "seq": {}, "events": {}, "outbox": {}, "audit": [], "alerts": []}
+        self._state = {"costs": {}, "seq": {}, "events": {}, "outbox": {}, "notifications": {}, "audit": [], "alerts": []}
 
     # --- transaksi -------------------------------------------------------
     @contextmanager
@@ -102,6 +102,27 @@ class InMemoryRepository:
             return copy.deepcopy(sorted(rows, key=lambda e: e["next_attempt_at"]))
 
     # --- audit & alert ---------------------------------------------------
+    # --- notifikasi WhatsApp ---------------------------------------------
+    def put_notification(self, entry: dict) -> None:
+        with self._lock:
+            self._state["notifications"][entry["key"]] = copy.deepcopy(entry)
+
+    def get_notification(self, key: str):
+        with self._lock:
+            entry = self._state["notifications"].get(key)
+            return copy.deepcopy(entry) if entry else None
+
+    def find_notification_by_message_id(self, message_id: str):
+        with self._lock:
+            for entry in self._state["notifications"].values():
+                if entry.get("message_id") == message_id:
+                    return copy.deepcopy(entry)
+        return None
+
+    def list_notifications(self):
+        with self._lock:
+            return copy.deepcopy(sorted(self._state["notifications"].values(), key=lambda e: e["created_at"]))
+
     def append_audit(self, entry: dict) -> None:
         with self._lock:
             self._state["audit"].append(copy.deepcopy(entry))
