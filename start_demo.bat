@@ -1,7 +1,9 @@
 @echo off
 rem Jalankan demo Wiraky Green Energy (Windows).
-rem Pemakaian:  start_demo.bat            (port default 5500)
-rem             set PORT=5000 && start_demo.bat
+rem Pemakaian (PowerShell): .\start_demo.bat                    (port default 5500)
+rem                         $env:PORT=5000; .\start_demo.bat
+rem Pemakaian (cmd):        start_demo.bat
+rem                         (ganti port: jalankan "set PORT=5000" dulu, lalu start_demo.bat)
 cd /d "%~dp0"
 
 if not exist .env echo [!] File .env belum ada. Jalankan: copy .env.example .env lalu isi nilainya. && pause && exit /b 1

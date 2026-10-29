@@ -14,10 +14,17 @@ Panduan singkat menjalankan demo `demo_final.py` dan membukanya ke client lewat 
 
 | OS | Perintah |
 |---|---|
-| Windows | `start_demo.bat` |
+| Windows (PowerShell, default terminal VS Code) | `.\start_demo.bat` |
+| Windows (cmd) | `start_demo.bat` |
 | Mac/Linux | `./start_demo.sh` (jika belum executable: `chmod +x start_demo.sh`) |
 
-Default port **5500**. Ganti dengan `set PORT=5000 && start_demo.bat` (Windows) atau `PORT=5000 ./start_demo.sh`. Script selalu mematikan debug mode.
+Default port **5500**. Untuk mengganti port:
+
+- PowerShell: `$env:PORT=5000; .\start_demo.bat`
+- cmd: `set PORT=5000` lalu `start_demo.bat`
+- Mac/Linux: `PORT=5000 ./start_demo.sh`
+
+Script selalu mematikan debug mode. Di PowerShell, file di folder saat ini harus diawali `.\` (tanpa itu muncul error "term is not recognized").
 
 ## 3. Buka ke client (VS Code Ports)
 
