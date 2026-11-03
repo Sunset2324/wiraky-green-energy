@@ -38,7 +38,7 @@ Kegagalan WhatsApp **tidak pernah mengubah status pembayaran**; hanya memunculka
 ## Hal yang perlu diperhatikan
 - **Opt-in**: Meta mewajibkan persetujuan pelanggan untuk menerima pesan WhatsApp. Pastikan form/surat persetujuan Wiraky mencakupnya (di luar kode).
 - Biaya: pesan template berbayar per percakapan/pesan sesuai tarif Meta saat ini; cek tarif terbaru.
-- `WA_API_VERSION` default `v21.0`; sesuaikan dengan versi Graph API yang masih didukung Meta saat Anda go-live.
+- `WA_API_VERSION` default `v21.0`. Menurut pengumuman Meta (Graph API v26, 29 Jul 2026), v21.0 **dihapus 21 Jan 2027** dan v26.0 adalah rilis terbaru. Sebelum tanggal itu ganti ke versi baru lewat `WA_API_VERSION` (contoh `v26.0`) dan uji kirim sekali. Kompatibilitas endpoint WhatsApp Cloud API dengan v26.0 belum saya verifikasi.
 - Antrean notifikasi **in-memory** (sama dengan data lain): hilang saat restart. Produksi butuh database.
 - Pesan masuk dari pelanggan tidak diproses (tidak bisa menyetujui atau melunasi tagihan lewat WhatsApp).
 - Kode ini **belum diuji terhadap server Meta sungguhan** (tidak ada kredensial di sini); diuji dengan transport tiruan sesuai bentuk respons Cloud API.
