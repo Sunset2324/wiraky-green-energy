@@ -4,26 +4,55 @@
 {% block content %}
 <div class="card">
     <h2>🛠️ Input Kebutuhan Tambahan</h2>
-    <p>Silakan isi rincian material/jasa di luar paket standar IndiHome Aura.</p>
-    
-    <form action="/process_order" method="POST">
+    <p>Isi rincian material/jasa di luar paket standar IndiHome Aura. Harga dihitung server dari master harga.
+       Pengajuan ke Finance hanya dikirim setelah <b>verifikasi Engineering</b> dan <b>persetujuan pelanggan</b> dicatat.
+       Jika tidak ada biaya tambahan (semua jumlah 0), tidak ada penagihan.</p>
+
+    {% if error %}<div class="alert alert-error">⚠️ {{ error }}</div>{% endif %}
+    {% if form.additional_cost_id %}
+    <div class="alert alert-warn">Mode <b>revisi</b> untuk {{ form.additional_cost_id }}: tagihan sebelumnya akan digantikan revisi baru.</div>
+    {% endif %}
+
+    <form action="/surveyor" method="POST">
+        <input type="hidden" name="additional_cost_id" value="{{ form.additional_cost_id }}">
+
+        <label>Nomor Order</label>
+        <input type="text" name="order_id" value="{{ form.order_id }}" placeholder="Contoh: WIR-2026-0001" required>
+
         <label>Nama Pelanggan</label>
-        <input type="text" name="customer_name" value="{{ customer_name }}" readonly>
-        
-        <label>Nomor Order Telkomsel</label>
-        <input type="text" name="order_id" placeholder="Contoh: ORD-12345" required>
+        <input type="text" name="customer_name" value="{{ form.customer_name }}" required>
 
-        <label>Pilih Material/Jasa (Master Price List)</label>
-        <select name="item_code" required>
+        <label>WhatsApp Pelanggan</label>
+        <input type="text" name="whatsapp" value="{{ form.whatsapp }}" placeholder="081234567890" required>
+
+        <label>Paket</label>
+        <input type="text" name="package" value="{{ form.package }}" required>
+
+        <label>Material / Jasa Tambahan (Master Price List)</label>
+        <div class="scroll">
+        <table>
+            <thead><tr><th>Item</th><th>Harga satuan</th><th>Jumlah</th></tr></thead>
+            <tbody>
             {% for code, info in master_price.items() %}
-            <option value="{{ code }}">{{ info.name }} - Rp {{ "{:,}".format(info.price) }}</option>
+            <tr>
+                <td>{{ info.description }} <span class="muted mono">{{ code }}</span></td>
+                <td>{{ info.unit_price | rupiah }} / {{ info.unit }}</td>
+                <td><input class="qty" type="number" min="0" max="10000" name="qty_{{ code }}" value="{{ qty[code] }}"></td>
+            </tr>
             {% endfor %}
-        </select>
+            </tbody>
+        </table>
+        </div>
+        <br>
 
-        <label>Alasan Teknis & Foto Pendukung</label>
-        <textarea name="reason" rows="3" placeholder="Jelaskan mengapa material ini diperlukan..."></textarea>
+        <label>Persetujuan (wajib sebelum dikirim ke Finance)</label>
+        <div style="margin-bottom: 12px;">
+            <label><input class="check" type="checkbox" name="engineering_verified" {% if form.engineering_verified %}checked{% endif %}>Telah diverifikasi Engineering</label><br>
+            <label><input class="check" type="checkbox" name="customer_approved" {% if form.customer_approved %}checked{% endif %}>Pelanggan telah menyetujui nilai tambahan</label>
+        </div>
+        <input type="text" name="approval_reference" value="{{ form.approval_reference }}" placeholder="Referensi persetujuan, contoh: APR-2026-0001">
 
-        <button type="submit" class="btn">✅ Hitung & Ajukan Persetujuan</button>
+        <button type="submit" class="btn">✅ Ajukan ke Finance</button>
     </form>
 </div>
 {% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ record.additional_cost_id }} - Wiraky{% endblock %}
+{% block head %}{% if auto %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>{{ record.additional_cost_id }} <span class="muted">revisi {{ record.revision }}</span>
+        <span class="badge {{ record.status | badge }}">{{ record.status }}</span></h2>
+    <p class="muted"><a href="/dashboard">← kembali ke dashboard</a></p>
+    <table>
+        <tr><th>Order</th><td>{{ record.order_id }}</td></tr>
+        <tr><th>Pelanggan</th><td>{{ record.customer.name }} · {{ record.customer.whatsapp }} · {{ record.customer.package }}</td></tr>
+        <tr><th>Total disetujui</th><td><b>{{ record.total_amount | rupiah }}</b></td></tr>
+        <tr><th>Persetujuan</th><td>{% if record.approval %}{{ record.approval.reference }} ({{ record.approval.approved_at }}){% else %}-{% endif %}</td></tr>
+        <tr><th>Event ID</th><td class="mono">{{ record.event_id or '-' }}</td></tr>
+        <tr><th>Finance reference</th><td class="mono">{{ record.finance_reference or '-' }}</td></tr>
+        <tr><th>Invoice / referensi bayar</th><td class="mono">{{ record.invoice_id or '-' }} / {{ record.payment_reference or '-' }}</td></tr>
+        <tr><th>Dibayar</th><td>{{ record.paid_at or '-' }}{% if record.verified_by %} · diverifikasi {{ record.verified_by }}{% endif %}</td></tr>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Rincian</h2>
+    <table>
+        <thead><tr><th>Item</th><th>Jumlah</th><th>Harga satuan</th><th>Subtotal</th></tr></thead>
+        <tbody>
+        {% for i in record['items'] %}
+        <tr><td>{{ i.description }} <span class="muted mono">{{ i.part_code }}</span></td>
+            <td>{{ i.qty }} {{ i.unit }}</td><td>{{ i.unit_price | rupiah }}</td><td>{{ i.subtotal | rupiah }}</td></tr>
+        {% else %}
+        <tr><td colspan="4" class="muted">Tidak ada Additional Cost (NOT_REQUIRED): tidak ada penagihan.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Riwayat status</h2>
+    {% for r in revisions|reverse %}
+    <p class="muted">Revisi {{ r.revision }}{% if r.superseded %} (digantikan){% endif %}</p>
+    <table>
+        <tbody>
+        {% for h in r.history %}
+        <tr><td class="mono">{{ h.at | wib }}</td>
+            <td>{% if h['from'] %}{{ h['from'] }} → {% endif %}<b>{{ h.to }}</b></td>
+            <td class="muted">{{ h.note }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endfor %}
+</div>
+
+<div class="card">
+    <h2>Audit log</h2>
+    <div class="scroll">
+    <table>
+        <tbody>
+        {% for a in audit|reverse %}
+        <tr><td class="mono">{{ a.at | wib }}</td><td class="mono">{{ a.action }}</td><td class="mono">{{ a.actor }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}
